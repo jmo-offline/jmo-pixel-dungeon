@@ -1,0 +1,1287 @@
+From b46230c75dfb5c6eab8b687f85af69c7c5abbb85 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 05:26:01 +0000
+Subject: [PATCH] Endgame step 1: King's Crown, class armor, armor abilities,
+ Endure
+
+The King of Dwarves drops the King's Crown. Wearing it opens a choice of
+the class's three armor abilities (unported ones shown but disabled) and
+turns the worn armor into class armor that keeps its stats and charges
+over time. The Warrior's Endure is the first working ability.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01HSv61cKy2EyUYHM43X2XFG
+---
+ docs/memory/change-log.md                     |   2 +
+ src/actors/buffs/class_armor_charger.gd       |  42 +++
+ src/actors/buffs/class_armor_charger.gd.uid   |   1 +
+ src/actors/buffs/endure_tracker.gd            |  75 +++++
+ src/actors/buffs/endure_tracker.gd.uid        |   1 +
+ src/actors/char.gd                            |   9 +
+ src/actors/hero/abilities/ability_endure.gd   |  40 +++
+ .../hero/abilities/ability_endure.gd.uid      |   1 +
+ src/actors/hero/abilities/armor_ability.gd    | 127 ++++++++
+ .../hero/abilities/armor_ability.gd.uid       |   1 +
+ src/actors/hero/hero.gd                       |  44 ++-
+ src/actors/mobs/bosses/king.gd                |   5 +
+ src/items/armor/class_armor.gd                | 129 ++++++++
+ src/items/armor/class_armor.gd.uid            |   1 +
+ src/items/generator.gd                        |  12 +
+ src/items/kings_crown.gd                      |  75 +++++
+ src/items/kings_crown.gd.uid                  |   1 +
+ src/scenes/game_scene.gd                      |   5 +-
+ src/ui/windows/wnd_choose_ability.gd          |  77 +++++
+ src/ui/windows/wnd_choose_ability.gd.uid      |   1 +
+ src/ui/windows/wnd_item.gd                    |  22 ++
+ tests/cases/test_kings_crown_class_armor.gd   | 303 ++++++++++++++++++
+ .../cases/test_kings_crown_class_armor.gd.uid |   1 +
+ 23 files changed, 973 insertions(+), 2 deletions(-)
+ create mode 100644 src/actors/buffs/class_armor_charger.gd
+ create mode 100644 src/actors/buffs/class_armor_charger.gd.uid
+ create mode 100644 src/actors/buffs/endure_tracker.gd
+ create mode 100644 src/actors/buffs/endure_tracker.gd.uid
+ create mode 100644 src/actors/hero/abilities/ability_endure.gd
+ create mode 100644 src/actors/hero/abilities/ability_endure.gd.uid
+ create mode 100644 src/actors/hero/abilities/armor_ability.gd
+ create mode 100644 src/actors/hero/abilities/armor_ability.gd.uid
+ create mode 100644 src/items/armor/class_armor.gd
+ create mode 100644 src/items/armor/class_armor.gd.uid
+ create mode 100644 src/items/kings_crown.gd
+ create mode 100644 src/items/kings_crown.gd.uid
+ create mode 100644 src/ui/windows/wnd_choose_ability.gd
+ create mode 100644 src/ui/windows/wnd_choose_ability.gd.uid
+ create mode 100644 tests/cases/test_kings_crown_class_armor.gd
+ create mode 100644 tests/cases/test_kings_crown_class_armor.gd.uid
+
+diff --git a/docs/memory/change-log.md b/docs/memory/change-log.md
+index 67cd9d5..28e8657 100644
+--- a/docs/memory/change-log.md
++++ b/docs/memory/change-log.md
+@@ -2812,3 +2812,5 @@
+ - CrystalMimic ported (upstream CrystalMimic.java, source-fetched from current master): new `crystal_mimic.gd` extends Mimic — disguised name/description read as a crystal chest; the free neutral interact bite keeps INFINITE_ACCURACY but deals a NORMAL damage roll instead of the fixed-max bonus (new overridable `Mimic._neutral_bonus_damage()` hook, base mimic unchanged) and steals one unit of a random unequipped non-unique level<1 backpack item into `stored_items` (upstream steal(); port adaptation: candidate filter replaces the 10x randomUnequipped reroll); reveal (stopHiding) goes FLEEING not HUNTING with a Haste burst (2 turns on the neutral interact reveal, 1 on damage reveals via a `_damage_reveal` flag); hostile attack_proc flings the victim to a random passable free adjacent cell (ScrollOfTeleportation.appear) and re-flees; `_act_fleeing` override escapes the level with all held loot (remove_mob + message) once out of LOS and 6+ tiles away (upstream Fleeing.escaped; port adaptation: mob->hero `can_see`/has_los stands in for heroFOV); generate_prize adds nothing and uncurses contents. Registered in MobFactory + mob_sprite (mimic.png row 2 = upstream MimicSprite.Crystal, static like base mimic) — both minimal fragile-file edits, gdparse-verified. Covered by `test_crystal_mimic.gd` (20 checks: chest identity, steal + backpack removal, below-max roll, 2/1-turn Haste split, fling adjacency + re-flee, escape, prize uncurse) in `run_tests.gd`. Full headless suite green locally (6900 checks, 0 failures; one `--import` for the new class_name). NOT SPAWNED YET: the port's CrystalVaultRoom places no chests/loot at all, so the upstream 1/10 crystal-chest swap has nowhere to hook — vault contents parity (2 crystal chests + crystal key + iron-key door, upstream CrystalVaultRoom.java) filed in backlog as the wiring slice.
+ 
+ - Missile durability upgrade scaling ported (upstream MissileWeapon.durabilityFactor: `round(base * 1.2^level)`). Previously upgrading a missile increased its damage range but left `uses_left` at the static per-type `base_uses` value. Added `durability_factor() -> int` (= `roundi(base_uses * pow(1.2, buffed_lvl()))`), updated `reset_uses()` to use it, and overrode `upgrade()` in `MissileWeapon` to call `reset_uses()` after the level increment so every upgrade refreshes durability proportionally. A +1 dart goes from 8 to 10 uses, a +2 javelin from 10 to 14, etc. No save-contract change (uses_left is already serialized; stored values from old saves remain valid and upgrade naturally on next use). Covered by `test_missile_durability_scaling.gd` (factor formula at levels 0-3, reset_uses contract, upgrade refresh, multi-upgrade accumulation, use_once countdown from scaled max, broken detection). Tags: missiles, durability, source-fidelity, audit-S16
++
++- Endgame step 1: King's Crown, class armor and the armor-ability frame, with the Warrior's Endure as the first working ability (upstream KingsCrown, ClassArmor, ArmorAbility, Endure, WndChooseAbility, source-fetched from current master). The King of Dwarves now drops the crown (`king.gd _on_death`). Using it while wearing armor opens `WndChooseAbility` (all 15 class abilities listed; unported ones greyed out "coming soon", same pattern as inert talents). Choosing converts the worn armor into `ClassArmor` (`warrior_armor`/`mage_armor`/`rogue_armor`/`huntress_armor`/`duelist_armor`, SPD sprites 181-185, crown 60) keeping tier, level, augment, glyph, seal and curse state, at 50% charge; `ClassArmorCharger` (permanent hidden hero buff) refills worn class armor 0.2%/turn, pausing on locked boss floors. `Hero.armor_ability` is saved as an ability id. Equipped class armor gets an ability button in `WndItem` (new `armor_ability` hero action). Endure: 50% charge, 3 turns; `EndureTracker` halves and banks half of incoming damage while bracing (Char.attack for character hits, Hero.take_damage for other sources), ends when the hero next acts, and adds the bank to the next hit. Hero sprite uses sheet row 6 while class armor is worn. Not ported yet: Endure's Gladiator combo +3 turns (port Combo has no timer), class armor TRANSFER, tier-4 talents (still gated off). Covered by `test_kings_crown_class_armor.gd`; full headless suite green on Godot 4.5.
+diff --git a/src/actors/buffs/class_armor_charger.gd b/src/actors/buffs/class_armor_charger.gd
+new file mode 100644
+index 0000000..3f54ce0
+--- /dev/null
++++ b/src/actors/buffs/class_armor_charger.gd
+@@ -0,0 +1,42 @@
++class_name ClassArmorCharger
++extends Buff
++## Upstream ClassArmor.Charger: refills the worn class armor by 0.2% a turn
++## (500 turns from empty to full). Upstream attaches the charger to the armor
++## while it is worn; here it is a permanent hidden buff on the hero, added
++## when the King's Crown is used, that charges whichever class armor is worn.
++
++func _init() -> void:
++	buff_id = "ClassArmorCharger"
++	buff_name = "Class Armor Charger"
++	buff_type = BuffType.POSITIVE
++	duration = -1
++	revive_persists = true
++	show_in_ui = false
++
++
++func on_turn() -> void:
++	if target == null or not target.is_alive or not _regen_on():
++		return
++	var owner_belongings: Variant = target.get("belongings")
++	if owner_belongings == null:
++		return
++	var worn: Variant = owner_belongings.get("armor")
++	if worn is ClassArmor:
++		(worn as ClassArmor).add_charge(ClassArmor.CHARGE_PER_TURN)
++
++
++func description() -> String:
++	return "Your class armor slowly recharges its ability while you wear it."
++
++
++## Upstream Regeneration.regenOn(): charging pauses on locked boss floors,
++## like natural regeneration and WeaponCharger.
++func _regen_on() -> bool:
++	if GameManager == null:
++		return true
++	var depth: int = GameManager.depth
++	if depth % 5 == 0 and depth > 0:
++		var level: Variant = GameManager.current_level
++		if level != null and level.has_method("is_locked") and level.is_locked():
++			return false
++	return true
+diff --git a/src/actors/buffs/class_armor_charger.gd.uid b/src/actors/buffs/class_armor_charger.gd.uid
+new file mode 100644
+index 0000000..7b1cf5b
+--- /dev/null
++++ b/src/actors/buffs/class_armor_charger.gd.uid
+@@ -0,0 +1 @@
++uid://c3mg2nch2og0
+diff --git a/src/actors/buffs/endure_tracker.gd b/src/actors/buffs/endure_tracker.gd
+new file mode 100644
+index 0000000..b3ad508
+--- /dev/null
++++ b/src/actors/buffs/endure_tracker.gd
+@@ -0,0 +1,75 @@
++class_name EndureTracker
++extends Buff
++## Upstream Endure.EndureTracker. While the Warrior is enduring (the 3 turns
++## the ability takes), damage he takes is halved and half of it is banked.
++## When he next acts, enduring ends and the bank is added to his next hit.
++## Char.attack applies both sides; Hero.take_damage covers damage that does
++## not come from a character.
++
++var enduring: bool = true
++var damage_bonus: int = 0
++var hits_left: int = 0
++
++
++func _init() -> void:
++	buff_id = "EndureTracker"
++	buff_name = "Endure"
++	buff_type = BuffType.POSITIVE
++	duration = AbilityEndure.TRACKER_DURATION
++	time_left = AbilityEndure.TRACKER_DURATION
++	icon_color = Color(1.0, 0.3, 0.3)
++
++
++## Upstream EndureTracker.adjustDamageTaken.
++func adjust_damage_taken(damage: float) -> float:
++	if enduring:
++		damage_bonus += int(damage / 2.0)
++		return damage * 0.5
++	return damage
++
++
++## Upstream EndureTracker.endEnduring, called when the hero is next ready.
++func end_enduring() -> void:
++	if not enduring:
++		return
++	enduring = false
++	hits_left = 1
++	@warning_ignore("integer_division")
++	damage_bonus = damage_bonus / hits_left
++	if damage_bonus > 0:
++		if MessageLog:
++			MessageLog.add_positive("You are ready to strike back!")
++	elif target != null and target.has_method("remove_buff"):
++		target.remove_buff(self)
++
++
++## Upstream EndureTracker.damageFactor: the banked bonus rides on the next hit.
++func damage_factor(damage: float) -> float:
++	if enduring:
++		return damage
++	var bonus: int = damage_bonus
++	hits_left -= 1
++	if hits_left <= 0 and target != null and target.has_method("remove_buff"):
++		target.remove_buff(self)
++	return damage + float(bonus)
++
++
++func description() -> String:
++	if enduring:
++		return "You are bracing yourself, taking half damage and storing some of it to strike back with."
++	return "Your next attack deals %d bonus damage.\n\nTurns remaining: %s." % [damage_bonus, disp_turns(time_left)]
++
++
++func serialize() -> Dictionary:
++	var data: Dictionary = super.serialize()
++	data["enduring"] = enduring
++	data["damage_bonus"] = damage_bonus
++	data["hits_left"] = hits_left
++	return data
++
++
++func deserialize(data: Dictionary) -> void:
++	super.deserialize(data)
++	enduring = bool(data.get("enduring", enduring))
++	damage_bonus = int(data.get("damage_bonus", damage_bonus))
++	hits_left = int(data.get("hits_left", hits_left))
+diff --git a/src/actors/buffs/endure_tracker.gd.uid b/src/actors/buffs/endure_tracker.gd.uid
+new file mode 100644
+index 0000000..e488e18
+--- /dev/null
++++ b/src/actors/buffs/endure_tracker.gd.uid
+@@ -0,0 +1 @@
++uid://dwpb6md24wqnj
+diff --git a/src/actors/char.gd b/src/actors/char.gd
+index 1d44242..3dd248c 100644
+--- a/src/actors/char.gd
++++ b/src/actors/char.gd
+@@ -124,6 +124,15 @@ func attack(target: Char, dmg_multi: float = 1.0, dmg_bonus: float = 0.0, acc_mu
+ 		if has_buff("Weakness"):
+ 			dmg *= 0.67
+ 
++		# Endure (upstream Char.attack): the attacker's banked retribution,
++		# then the defender's bracing damage reduction.
++		var own_endure: Node = get_buff("EndureTracker")
++		if own_endure != null and own_endure.has_method("damage_factor"):
++			dmg = own_endure.damage_factor(dmg)
++		var foe_endure: Node = target.get_buff("EndureTracker")
++		if foe_endure != null and foe_endure.has_method("adjust_damage_taken"):
++			dmg = foe_endure.adjust_damage_taken(dmg)
++
+ 		# defenseProc (pre-armor: earthroot, glyphs, etc.)
+ 		var effective_dmg: int = target.defense_proc(self, roundi(dmg))
+ 
+diff --git a/src/actors/hero/abilities/ability_endure.gd b/src/actors/hero/abilities/ability_endure.gd
+new file mode 100644
+index 0000000..fe22958
+--- /dev/null
++++ b/src/actors/hero/abilities/ability_endure.gd
+@@ -0,0 +1,40 @@
++class_name AbilityEndure
++extends ArmorAbility
++## Upstream Endure (Warrior armor ability): the Warrior braces for 3 turns,
++## taking half damage and banking half of it, then adds the bank to his next
++## hit. The work happens in EndureTracker.
++##
++## Port adaptations: upstream also adds 3 turns to the Gladiator's combo
++## timer; the port's Combo has no timer, so that part is skipped. The tier-4
++## talents (Sustained Retribution, Shrug It Off, Even the Odds) arrive with
++## the tier-4 talent work.
++
++const ENDURE_TIME: float = 3.0
++const TRACKER_DURATION: float = 12.0
++
++
++func _init() -> void:
++	ability_id = "endure"
++	ability_name = "Endure"
++	hero_class = ConstantsData.HeroClass.WARRIOR
++	short_desc = "The Warrior braces himself for 3 turns, taking half damage. Half of the damage he takes is added to his next attack."
++	base_charge_use = 50.0
++	targeted = false
++	implemented = true
++
++
++func activate(armor: ClassArmor, hero: Hero, _target_pos: int) -> float:
++	if armor == null or hero == null:
++		return -1.0
++	var existing: Node = hero.get_buff("EndureTracker")
++	if existing != null:
++		hero.remove_buff(existing)
++	var tracker: EndureTracker = EndureTracker.new()
++	tracker.set_duration(TRACKER_DURATION)
++	hero.add_buff(tracker)
++
++	armor.charge -= charge_use(hero)
++	Invisibility.dispel_for(hero)
++	if MessageLog:
++		MessageLog.add_positive("You brace yourself to endure.")
++	return ENDURE_TIME
+diff --git a/src/actors/hero/abilities/ability_endure.gd.uid b/src/actors/hero/abilities/ability_endure.gd.uid
+new file mode 100644
+index 0000000..401fcd3
+--- /dev/null
++++ b/src/actors/hero/abilities/ability_endure.gd.uid
+@@ -0,0 +1 @@
++uid://bhmu4i4owkpga
+diff --git a/src/actors/hero/abilities/armor_ability.gd b/src/actors/hero/abilities/armor_ability.gd
+new file mode 100644
+index 0000000..be39a2a
+--- /dev/null
++++ b/src/actors/hero/abilities/armor_ability.gd
+@@ -0,0 +1,127 @@
++class_name ArmorAbility
++extends RefCounted
++## Upstream ArmorAbility: the active power a hero picks when the King's Crown
++## turns their armor into class armor. Each class has three. Using one spends
++## a share of the class armor's charge.
++##
++## Abilities that are not ported yet are registered with implemented = false,
++## so the choice window can list them without letting them be picked (the same
++## pattern TalentData uses for unimplemented talents).
++
++var ability_id: String = ""
++var ability_name: String = ""
++var short_desc: String = ""
++var hero_class: int = ConstantsData.HeroClass.WARRIOR
++## Upstream ArmorAbility.baseChargeUse.
++var base_charge_use: float = 35.0
++## True when the ability asks for a target cell before activating.
++var targeted: bool = false
++var implemented: bool = false
++
++
++## Upstream ArmorAbility.chargeUse. Heroic Energy is a tier-4 talent and is
++## not ported yet, so the cost is the base cost.
++func charge_use(_hero: Hero) -> float:
++	return base_charge_use
++
++
++## Upstream ArmorAbility.activate. Returns the time the hero spends, or a
++## negative number when the ability was refused and nothing was spent.
++func activate(_armor: ClassArmor, _hero: Hero, _target_pos: int) -> float:
++	return -1.0
++
++
++## Upstream ArmorAbility.desc: short description plus the charge cost.
++func get_description() -> String:
++	if not implemented:
++		return short_desc
++	return "%s\n\nUses %d%% of the armor's charge." % [short_desc, int(base_charge_use)]
++
++
++# ---------------------------------------------------------------------------
++# Registry
++# ---------------------------------------------------------------------------
++
++## The three abilities a class can choose from, in upstream order.
++static func abilities_for(for_class: int) -> Array[ArmorAbility]:
++	var result: Array[ArmorAbility] = []
++	for id: String in ids_for(for_class):
++		var ability: ArmorAbility = create(id)
++		if ability != null:
++			result.append(ability)
++	return result
++
++
++static func ids_for(for_class: int) -> Array[String]:
++	match for_class:
++		ConstantsData.HeroClass.WARRIOR:
++			return ["heroic_leap", "shockwave", "endure"]
++		ConstantsData.HeroClass.MAGE:
++			return ["elemental_blast", "wild_magic", "warp_beacon"]
++		ConstantsData.HeroClass.ROGUE:
++			return ["smoke_bomb", "death_mark", "shadow_clone"]
++		ConstantsData.HeroClass.HUNTRESS:
++			return ["spectral_blades", "natures_power", "spirit_hawk"]
++		ConstantsData.HeroClass.DUELIST:
++			return ["challenge", "elemental_strike", "feint"]
++	return []
++
++
++## Build an ability by id, or null for an unknown id.
++static func create(id: String) -> ArmorAbility:
++	match id:
++		"endure":
++			return AbilityEndure.new()
++		"heroic_leap":
++			return _inert(id, "Heroic Leap", ConstantsData.HeroClass.WARRIOR,
++				"The Warrior leaps to a chosen spot, slamming down on nearby enemies.")
++		"shockwave":
++			return _inert(id, "Shockwave", ConstantsData.HeroClass.WARRIOR,
++				"The Warrior slams the ground, sending out a cone of force that damages and cripples enemies.")
++		"elemental_blast":
++			return _inert(id, "Elemental Blast", ConstantsData.HeroClass.MAGE,
++				"The Mage releases a blast of magic around himself, shaped by the wand in his staff.")
++		"wild_magic":
++			return _inert(id, "Wild Magic", ConstantsData.HeroClass.MAGE,
++				"The Mage zaps a target several times with random wands from his pack.")
++		"warp_beacon":
++			return _inert(id, "Warp Beacon", ConstantsData.HeroClass.MAGE,
++				"The Mage places a beacon that he can teleport back to later.")
++		"smoke_bomb":
++			return _inert(id, "Smoke Bomb", ConstantsData.HeroClass.ROGUE,
++				"The Rogue vanishes in smoke and reappears a short distance away, blinding nearby enemies.")
++		"death_mark":
++			return _inert(id, "Death Mark", ConstantsData.HeroClass.ROGUE,
++				"The Rogue marks an enemy, making it take more damage and stopping it from dying until the mark ends.")
++		"shadow_clone":
++			return _inert(id, "Shadow Clone", ConstantsData.HeroClass.ROGUE,
++				"The Rogue summons a shadow clone that fights beside him.")
++		"spectral_blades":
++			return _inert(id, "Spectral Blades", ConstantsData.HeroClass.HUNTRESS,
++				"The Huntress throws a volley of spectral blades at a target.")
++		"natures_power":
++			return _inert(id, "Nature's Power", ConstantsData.HeroClass.HUNTRESS,
++				"The Huntress draws on nature to attack faster with her bow for a time.")
++		"spirit_hawk":
++			return _inert(id, "Spirit Hawk", ConstantsData.HeroClass.HUNTRESS,
++				"The Huntress summons a spirit hawk that scouts and fights for her.")
++		"challenge":
++			return _inert(id, "Challenge", ConstantsData.HeroClass.DUELIST,
++				"The Duelist challenges an enemy to a duel in a sealed arena.")
++		"elemental_strike":
++			return _inert(id, "Elemental Strike", ConstantsData.HeroClass.DUELIST,
++				"The Duelist strikes in a cone, with an extra effect based on her weapon's enchantment.")
++		"feint":
++			return _inert(id, "Feint", ConstantsData.HeroClass.DUELIST,
++				"The Duelist dodges aside, leaving a decoy that enemies attack instead.")
++	return null
++
++
++static func _inert(id: String, display_name: String, for_class: int, desc: String) -> ArmorAbility:
++	var ability: ArmorAbility = ArmorAbility.new()
++	ability.ability_id = id
++	ability.ability_name = display_name
++	ability.hero_class = for_class
++	ability.short_desc = desc
++	ability.implemented = false
++	return ability
+diff --git a/src/actors/hero/abilities/armor_ability.gd.uid b/src/actors/hero/abilities/armor_ability.gd.uid
+new file mode 100644
+index 0000000..e631315
+--- /dev/null
++++ b/src/actors/hero/abilities/armor_ability.gd.uid
+@@ -0,0 +1 @@
++uid://baygmnmq155lr
+diff --git a/src/actors/hero/hero.gd b/src/actors/hero/hero.gd
+index 452ac93..3779c8f 100644
+--- a/src/actors/hero/hero.gd
++++ b/src/actors/hero/hero.gd
+@@ -21,6 +21,8 @@ var hero_level: int = 1
+ var xp: int = 0
+ var xp_to_next: int = 10  # 5 + level * 5
+ var talent_levels: Dictionary[String, int] = {}
++## Upstream Hero.armorAbility: chosen once, with the King's Crown.
++var armor_ability: ArmorAbility = null
+ var belongings: Belongings = null
+ 
+ ## Multiplayer peer ID (0 = local/host, >0 = remote player).
+@@ -236,6 +238,10 @@ func execute_action() -> void:
+ 	if equipped_artifact != null and equipped_artifact.has_method("on_turn"):
+ 		equipped_artifact.on_turn(self)
+ 	_light_cloak_recharge()
++	# Upstream Hero.act: Endure's bracing phase ends when the hero is next ready.
++	var endure: EndureTracker = get_buff("EndureTracker") as EndureTracker
++	if endure != null:
++		endure.end_enduring()
+ 
+ 	# If the hero died during buff processing (starvation, poison), skip the action
+ 	# but still complete the turn to avoid softlocking the turn system.
+@@ -291,6 +297,8 @@ func execute_action() -> void:
+ 			_do_weapon_ability(action.get("item"), action.get("target_pos", -1))
+ 		"monk_ability":
+ 			_do_monk_ability(str(action.get("kind", "")), action.get("target_pos", -1))
++		"armor_ability":
++			_do_armor_ability(action.get("target_pos", -1))
+ 		"wait":
+ 			_do_wait()
+ 		"use_item":
+@@ -330,7 +338,7 @@ func execute_action() -> void:
+ 				thrown_bow.sniper_special_distance = 0
+ 		"zap_wand":
+ 			spend_turn(_get_non_movement_action_delay())
+-		"weapon_ability", "monk_ability":
++		"weapon_ability", "monk_ability", "armor_ability":
+ 			# Refused abilities and kills are free (upstream hero.next()).
+ 			if _ability_spend > 0.0:
+ 				spend_turn(_ability_spend)
+@@ -1109,6 +1117,28 @@ func _sneak_step_distance(target_pos: int) -> int:
+ 			queue.append(neighbor)
+ 	return 9999
+ 
++## Upstream ClassArmor.execute(AC_ABILITY): needs worn class armor, a chosen
++## ability and enough charge. The ability returns its time cost, or a
++## negative number when refused (which costs nothing).
++func _do_armor_ability(target_pos: int) -> void:
++	_ability_spend = 0.0
++	if armor_ability == null or belongings == null:
++		return
++	var worn: ClassArmor = belongings.armor as ClassArmor
++	if worn == null:
++		if MessageLog:
++			MessageLog.add_warning("You need to wear your class armor to use its ability.")
++		return
++	if worn.charge < armor_ability.charge_use(self):
++		if MessageLog:
++			MessageLog.add_warning("Your armor doesn't have enough charge.")
++		return
++	var spent: float = armor_ability.activate(worn, self, target_pos)
++	if spent > 0.0:
++		_ability_spend = _neutralize_movement_speed_for_action(spent)
++	if EventBus:
++		EventBus.hero_stats_changed.emit()
++
+ func _do_search() -> void:
+ 	if level == null:
+ 		return
+@@ -2325,6 +2355,8 @@ func serialize() -> Dictionary:
+ 	data["xp"] = xp
+ 	data["xp_to_next"] = xp_to_next
+ 	data["talent_levels"] = talent_levels.duplicate(true)
++	if armor_ability != null:
++		data["armor_ability"] = armor_ability.ability_id
+ 	data["hero_name"] = hero_name
+ 	data["owner_peer_id"] = owner_peer_id
+ 	data["hero_slot_index"] = hero_slot_index
+@@ -2368,6 +2400,7 @@ func deserialize(data: Dictionary) -> void:
+ 		var guarded_points: int = mini(int(talent_levels["champion_guarded_offense"]), 3)
+ 		talent_levels.erase("champion_guarded_offense")
+ 		talent_levels["champion_twin_upgrades"] = maxi(guarded_points, int(talent_levels.get("champion_twin_upgrades", 0)))
++	armor_ability = ArmorAbility.create(str(data.get("armor_ability", "")))
+ 	hero_name = data.get("hero_name", HeroClassData.get_class_name_str(hero_class))
+ 	owner_peer_id = int(data.get("owner_peer_id", 1))
+ 	hero_slot_index = int(data.get("hero_slot_index", 0))
+@@ -2401,6 +2434,9 @@ func deserialize(data: Dictionary) -> void:
+ 	# must always carry the charge pool, so attach one if missing.
+ 	if hero_class == ConstantsData.HeroClass.DUELIST and not has_buff("WeaponCharger"):
+ 		add_buff(WeaponCharger.new())
++	# The class armor charger rides on the hero once an ability is chosen.
++	if armor_ability != null and not has_buff("ClassArmorCharger"):
++		add_buff(ClassArmorCharger.new())
+ 
+ # ---------------------------------------------------------------------------
+ # Damage & Death Overrides
+@@ -2421,6 +2457,12 @@ func take_damage(amount: int, source: Variant = null) -> int:
+ 	# melee and non-Char sources alike).
+ 	if amount > 0 and has_buff("MeditateResistance"):
+ 		amount = roundi(float(amount) * 0.2)
++	# Endure (upstream Hero.damage): damage from a character was already
++	# reduced in Char.attack, so only other sources are reduced here.
++	if amount > 0 and not (source is Char):
++		var endure: EndureTracker = get_buff("EndureTracker") as EndureTracker
++		if endure != null:
++			amount = roundi(endure.adjust_damage_taken(float(amount)))
+ 	var hp_before: int = hp
+ 	var actual: int = super.take_damage(amount, source)
+ 	if actual > 0:
+diff --git a/src/actors/mobs/bosses/king.gd b/src/actors/mobs/bosses/king.gd
+index 88e3b72..7e3e493 100644
+--- a/src/actors/mobs/bosses/king.gd
++++ b/src/actors/mobs/bosses/king.gd
+@@ -98,6 +98,11 @@ func _on_death(source: Variant) -> void:
+ 		MessageLog.add_positive("The King of Dwarves is slain! The throne room falls silent.")
+ 	if level and level.has_method("unseal"):
+ 		level.unseal()
++	# Upstream DwarfKing.die drops the King's Crown.
++	if level and level.has_method("drop_item") and Generator:
++		var crown: Variant = Generator.create_item("kings_crown")
++		if crown != null:
++			level.drop_item(pos, crown)
+ 	super._on_death(source)
+ 
+ func serialize() -> Dictionary:
+diff --git a/src/items/armor/class_armor.gd b/src/items/armor/class_armor.gd
+new file mode 100644
+index 0000000..089146a
+--- /dev/null
++++ b/src/items/armor/class_armor.gd
+@@ -0,0 +1,129 @@
++class_name ClassArmor
++extends Armor
++## Upstream ClassArmor: the armor the King's Crown makes. It keeps the source
++## armor's tier, level, glyph, augment, seal and curse state, and holds a
++## charge (0-100%) that powers the hero's armor ability. ClassArmorCharger
++## refills the charge over time while the armor is worn.
++##
++## Not ported yet: upstream's TRANSFER action (moving the class armor's
++## powers onto a different armor).
++
++const MAX_CHARGE: float = 100.0
++## Upstream ClassArmor.upgrade starts the new armor at half charge.
++const STARTING_CHARGE: float = 50.0
++## Upstream ClassArmor.Charger: 500 turns from empty to full.
++const CHARGE_PER_TURN: float = 100.0 / 500.0
++
++const IDS_BY_CLASS: Dictionary = {
++	ConstantsData.HeroClass.WARRIOR: "warrior_armor",
++	ConstantsData.HeroClass.MAGE: "mage_armor",
++	ConstantsData.HeroClass.ROGUE: "rogue_armor",
++	ConstantsData.HeroClass.HUNTRESS: "huntress_armor",
++	ConstantsData.HeroClass.DUELIST: "duelist_armor",
++}
++
++var charge: float = 0.0
++
++
++func _init() -> void:
++	super._init()
++	default_action = "ABILITY"
++	level_known = true
++	cursed_known = true
++	unique = true
++
++
++static func all_ids() -> Array[String]:
++	return ["warrior_armor", "mage_armor", "rogue_armor", "huntress_armor", "duelist_armor"]
++
++
++## Build an empty class armor by id. Saves and Generator use this; play uses
++## from_armor so the stats come from the armor the crown was used on.
++static func create(armor_id: String) -> ClassArmor:
++	var a: ClassArmor = ClassArmor.new()
++	a.item_id = armor_id
++	match armor_id:
++		"warrior_armor":
++			a.item_name = "Warrior Armor"
++			a.description = "Crafted from the King's Crown, this armor is worthy of a warrior."
++		"mage_armor":
++			a.item_name = "Mage Robe"
++			a.description = "Crafted from the King's Crown, this robe hums with the mage's magic."
++		"rogue_armor":
++			a.item_name = "Rogue Garb"
++			a.description = "Crafted from the King's Crown, this dark garb suits a rogue."
++		"huntress_armor":
++			a.item_name = "Huntress Cloak"
++			a.description = "Crafted from the King's Crown, this cloak is light and silent."
++		"duelist_armor":
++			a.item_name = "Duelist Armor"
++			a.description = "Crafted from the King's Crown, this armor is made for a duelist's footwork."
++		_:
++			a.item_name = armor_id.capitalize()
++	a._update_str_requirement()
++	return a
++
++
++## Upstream ClassArmor.upgrade: turn a regular armor into this hero class's
++## class armor, keeping its tier, level, glyph, augment, seal and curse state.
++static func from_armor(for_class: int, armor: Armor) -> ClassArmor:
++	var armor_id: String = str(IDS_BY_CLASS.get(for_class, "warrior_armor"))
++	var a: ClassArmor = null
++	if Generator:
++		a = Generator.create_item(armor_id) as ClassArmor
++	if a == null:
++		a = create(armor_id)
++	if armor != null:
++		a.level = armor.level
++		a.tier = armor.tier
++		a.augment = armor.augment
++		a.glyph = armor.glyph
++		a.seal_attached = armor.seal_attached
++		a.enchant_hardened = armor.enchant_hardened
++		a.cursed = armor.cursed
++		a.curse_infusion_bonus = armor.curse_infusion_bonus
++		a.mastery_potion_bonus = armor.mastery_potion_bonus
++		if armor.level_known and armor.cursed_known:
++			a.identify()
++		else:
++			a.level_known = armor.level_known
++			a.cursed_known = true
++	a.charge = STARTING_CHARGE
++	a._update_str_requirement()
++	return a
++
++
++func add_charge(amount: float) -> void:
++	charge = clampf(charge + amount, 0.0, MAX_CHARGE)
++
++
++## Upstream ClassArmor.value: class armor can't be sold.
++func value() -> int:
++	return 0
++
++
++func get_stats_text() -> String:
++	return "%s  Charge: %d%%" % [super.get_stats_text(), int(floor(charge))]
++
++
++func duplicate_item() -> Item:
++	var copy: ClassArmor = ClassArmor.create(item_id)
++	_copy_base_properties(copy)
++	copy.tier = tier
++	copy.augment = augment
++	copy.charge = charge
++	if glyph != null:
++		copy.glyph = ArmorGlyph.create(glyph.glyph_id)
++	copy._update_str_requirement()
++	return copy
++
++
++func serialize() -> Dictionary:
++	var data: Dictionary = super.serialize()
++	data["charge"] = charge
++	return data
++
++
++func deserialize(data: Dictionary) -> void:
++	super.deserialize(data)
++	charge = clampf(float(data.get("charge", 0.0)), 0.0, MAX_CHARGE)
+diff --git a/src/items/armor/class_armor.gd.uid b/src/items/armor/class_armor.gd.uid
+new file mode 100644
+index 0000000..bdc664a
+--- /dev/null
++++ b/src/items/armor/class_armor.gd.uid
+@@ -0,0 +1 @@
++uid://dh0wrje1e0peo
+diff --git a/src/items/generator.gd b/src/items/generator.gd
+index ebab066..3c41b7c 100644
+--- a/src/items/generator.gd
++++ b/src/items/generator.gd
+@@ -474,6 +474,8 @@ static func _create_item_internal(item_id: String) -> Item:
+ 			return Torch.new()
+ 		"amulet_of_yendor":
+ 			return AmuletOfYendor.new()
++		"kings_crown":
++			return KingsCrown.new()
+ 		"metal_shard":
+ 			return _make_misc_item("metal_shard", "Metal Shard", "A jagged fragment of dwarven machinery. It looks like it could be useful to someone.", ConstantsData.ItemCategory.MISC)
+ 		"corpse_dust":
+@@ -501,6 +503,10 @@ static func _create_item_internal(item_id: String) -> Item:
+ 	if item_id in _ARMOR_IDS:
+ 		return Armor.create(item_id)
+ 
++	# --- Class armor (made by the King's Crown, never generated as loot) ---
++	if item_id in ClassArmor.all_ids():
++		return ClassArmor.create(item_id)
++
+ 	# --- Potions (known IDs) ---
+ 	if item_id in _POTION_IDS:
+ 		return Potion.create(item_id)
+@@ -844,6 +850,7 @@ const SPRITE_INDICES: Dictionary = {
+ 	"dewdrop": 21,
+ 	"ankh": 48,
+ 	"torch": 51,
++	"kings_crown": 60,
+ 	"amulet_of_yendor": 61,
+ 	# --- Keys (row 4) ---
+ 	"iron_key": 55,
+@@ -915,6 +922,11 @@ const SPRITE_INDICES: Dictionary = {
+ 	"mail_armor": 178,
+ 	"scale_armor": 179,
+ 	"plate_armor": 180,
++	"warrior_armor": 181,
++	"mage_armor": 182,
++	"rogue_armor": 183,
++	"huntress_armor": 184,
++	"duelist_armor": 185,
+ 	# --- Wands (row 14) ---
+ 	"wand_of_magic_missile": 208,
+ 	"wand_of_fire_bolt": 209,
+diff --git a/src/items/kings_crown.gd b/src/items/kings_crown.gd
+new file mode 100644
+index 0000000..07f0737
+--- /dev/null
++++ b/src/items/kings_crown.gd
+@@ -0,0 +1,75 @@
++class_name KingsCrown
++extends Item
++## Upstream KingsCrown, dropped by the King of Dwarves. Wearing it opens
++## WndChooseAbility; choosing an ability turns the worn armor into class
++## armor and sets the hero's armor ability for the rest of the run.
++
++
++func _init() -> void:
++	item_id = "kings_crown"
++	item_name = "King's Crown"
++	description = "This crown once belonged to the King of Dwarves. It could be used to reforge your armor into something worthy of a true hero, unlocking a powerful ability."
++	category = ConstantsData.ItemCategory.MISC
++	default_action = "WEAR"
++	stackable = false
++	unique = true
++	identified = true
++	level_known = true
++	cursed_known = true
++
++
++func is_upgradeable() -> bool:
++	return false
++
++
++func is_identified() -> bool:
++	return true
++
++
++## Upstream KingsCrown.execute(AC_WEAR): needs worn armor, then opens the
++## ability choice. Nothing is spent until an ability is chosen.
++func execute(hero: Char) -> void:
++	if hero == null or not (hero is Hero):
++		return
++	var h: Hero = hero as Hero
++	if h.armor_ability != null:
++		if MessageLog:
++			MessageLog.add_warning("You have already chosen your armor ability.")
++		return
++	if h.belongings == null or not (h.belongings.armor is Armor):
++		if MessageLog:
++			MessageLog.add_warning("You need to be wearing armor to use the crown.")
++		return
++	var wnd: WndChooseAbility = WndChooseAbility.new()
++	wnd.setup(h, self)
++	if EventBus:
++		EventBus.show_window.emit(wnd)
++
++
++## Upstream KingsCrown.upgradeArmor: consume the crown, swap the worn armor
++## for class armor and set the hero's ability. Returns false when refused.
++func upgrade_armor(hero: Hero, ability: ArmorAbility) -> bool:
++	if hero == null or ability == null or not ability.implemented:
++		return false
++	if hero.armor_ability != null or hero.belongings == null:
++		return false
++	var worn: Variant = hero.belongings.armor
++	if not (worn is Armor):
++		return false
++	hero.belongings.remove_item(self)
++
++	var class_armor: ClassArmor = ClassArmor.from_armor(hero.hero_class, worn as Armor)
++	# Assigned directly, as upstream does, so equip side effects (curse
++	# messages, intuition rolls) don't fire a second time.
++	hero.belongings.armor = class_armor
++	hero.armor_ability = ability
++	if not hero.has_buff("ClassArmorCharger"):
++		hero.add_buff(ClassArmorCharger.new())
++
++	if MessageLog:
++		MessageLog.add_positive("The crown dissolves into your armor, which glows with new power!")
++	if AudioManager:
++		AudioManager.play_sfx("mastery")
++	if EventBus:
++		EventBus.hero_stats_changed.emit()
++	return true
+diff --git a/src/items/kings_crown.gd.uid b/src/items/kings_crown.gd.uid
+new file mode 100644
+index 0000000..db7e6b3
+--- /dev/null
++++ b/src/items/kings_crown.gd.uid
+@@ -0,0 +1 @@
++uid://crvlehd8n1ubu
+diff --git a/src/scenes/game_scene.gd b/src/scenes/game_scene.gd
+index 664d9c4..5483c60 100644
+--- a/src/scenes/game_scene.gd
++++ b/src/scenes/game_scene.gd
+@@ -939,7 +939,10 @@ func _apply_hero_equipment_visuals(hero_sprite: Variant, hero_node: Variant) ->
+ 	var belongings: Variant = ConstantsData.get_prop(hero_node, "belongings", null)
+ 	if belongings != null and belongings.has_method("get_equipped_armor"):
+ 		var equipped_armor: Variant = belongings.get_equipped_armor()
+-		if equipped_armor != null:
++		if equipped_armor is ClassArmor:
++			# Upstream Hero.tier(): class armor uses the sheet's sixth row.
++			armor_tier = 6
++		elif equipped_armor != null:
+ 			armor_tier = int(ConstantsData.get_prop(equipped_armor, "tier", 0))
+ 	hero_sprite.update_armor(armor_tier)
+ 
+diff --git a/src/ui/windows/wnd_choose_ability.gd b/src/ui/windows/wnd_choose_ability.gd
+new file mode 100644
+index 0000000..b4320f9
+--- /dev/null
++++ b/src/ui/windows/wnd_choose_ability.gd
+@@ -0,0 +1,77 @@
++class_name WndChooseAbility
++extends WndBase
++## Upstream WndChooseAbility: lists the hero class's three armor abilities.
++## Choosing one consumes the King's Crown, turns the worn armor into class
++## armor and sets the ability. Abilities that aren't ported yet are shown
++## but can't be picked. Cancel closes without cost and keeps the crown.
++
++var _hero: Hero = null
++var _crown: KingsCrown = null
++
++
++func _init() -> void:
++	window_title = "Choose an Armor Ability"
++	custom_minimum_size = Vector2(340, 220)
++
++
++func setup(hero: Hero, crown: KingsCrown) -> void:
++	_hero = hero
++	_crown = crown
++	refresh_content()
++
++
++func _build_content() -> Control:
++	var main: VBoxContainer = VBoxContainer.new()
++	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++	main.add_theme_constant_override("separation", 6)
++	if _hero == null:
++		return main
++
++	var intro: Label = Label.new()
++	intro.text = "The crown will turn your armor into class armor with one of these abilities. This choice is permanent."
++	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
++	intro.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++	intro.add_theme_font_size_override("font_size", 12)
++	intro.add_theme_color_override("font_color", Color(0.7, 0.65, 0.55))
++	main.add_child(intro)
++
++	for ability: ArmorAbility in ArmorAbility.abilities_for(_hero.hero_class):
++		var button: Button = Button.new()
++		button.text = ability.ability_name
++		if not ability.implemented:
++			button.text += " (coming soon)"
++			button.disabled = true
++		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++		button.pressed.connect(choose.bind(ability.ability_id))
++		main.add_child(button)
++
++		var desc: Label = Label.new()
++		desc.text = ability.get_description()
++		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
++		desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++		desc.add_theme_font_size_override("font_size", 11)
++		desc.add_theme_color_override("font_color", Color(0.7, 0.65, 0.55))
++		main.add_child(desc)
++
++	var cancel: Button = Button.new()
++	cancel.text = "Not yet"
++	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++	cancel.pressed.connect(close_window)
++	main.add_child(cancel)
++
++	return main
++
++
++## Upstream WndChooseAbility -> KingsCrown.upgradeArmor. Unported abilities
++## and a hero who already has an ability are refused. The turn cost is
++## charged by Hero.execute_action's use_item branch.
++func choose(ability_id: String) -> void:
++	if _hero == null or _crown == null:
++		close_window()
++		return
++	var ability: ArmorAbility = ArmorAbility.create(ability_id)
++	if ability == null or not ability.implemented \
++			or ability.hero_class != _hero.hero_class:
++		return
++	_crown.upgrade_armor(_hero, ability)
++	close_window()
+diff --git a/src/ui/windows/wnd_choose_ability.gd.uid b/src/ui/windows/wnd_choose_ability.gd.uid
+new file mode 100644
+index 0000000..2dff584
+--- /dev/null
++++ b/src/ui/windows/wnd_choose_ability.gd.uid
+@@ -0,0 +1 @@
++uid://bt6mpqihwliq8
+diff --git a/src/ui/windows/wnd_item.gd b/src/ui/windows/wnd_item.gd
+index bd98459..2cf8a0e 100644
+--- a/src/ui/windows/wnd_item.gd
++++ b/src/ui/windows/wnd_item.gd
+@@ -142,6 +142,9 @@ func _add_action_buttons(container: HFlowContainer) -> void:
+ 			and _hero.hero_class == ConstantsData.HeroClass.DUELIST \
+ 			and (_item as MeleeWeapon).has_duelist_ability():
+ 		_add_button(container, (_item as MeleeWeapon).ability_name(), _action_weapon_ability)
++	# Class armor ability (upstream ClassArmor AC_ABILITY: equipped only)
++	if _item is ClassArmor and _is_equipped and _hero != null and _hero.armor_ability != null:
++		_add_button(container, _hero.armor_ability.ability_name, _action_armor_ability)
+ 	match cat:
+ 		ConstantsData.ItemCategory.POTION:
+ 			_add_button(container, "Drink", _action_use)
+@@ -362,6 +365,25 @@ func _execute_weapon_ability_callback(target_cell: int) -> void:
+ 	if EventBus and EventBus.has_signal("request_hero_action"):
+ 		EventBus.request_hero_action.emit({"type": "weapon_ability", "item": _item, "target_pos": target_cell})
+ 
++## Class armor ability: self-targeted abilities act at once; targeted ones
++## pick a cell first (upstream ArmorAbility.use).
++func _action_armor_ability() -> void:
++	if _hero == null or _hero.armor_ability == null:
++		close_window()
++		return
++	if not _hero.armor_ability.targeted:
++		if EventBus and EventBus.has_signal("request_hero_action"):
++			EventBus.request_hero_action.emit({"type": "armor_ability", "target_pos": _hero.pos})
++		close_window()
++		return
++	if EventBus:
++		EventBus.enter_targeting.emit(_item, 8, _execute_armor_ability_callback)
++	close_window()
++
++func _execute_armor_ability_callback(target_cell: int) -> void:
++	if EventBus and EventBus.has_signal("request_hero_action"):
++		EventBus.request_hero_action.emit({"type": "armor_ability", "target_pos": target_cell})
++
+ func _action_shoot() -> void:
+ 	var item_name_str: String = ConstantsData.get_prop(_item, "item_name", "item")
+ 	if MessageLog:
+diff --git a/tests/cases/test_kings_crown_class_armor.gd b/tests/cases/test_kings_crown_class_armor.gd
+new file mode 100644
+index 0000000..dacb728
+--- /dev/null
++++ b/tests/cases/test_kings_crown_class_armor.gd
+@@ -0,0 +1,303 @@
++extends RefCounted
++## King's Crown, class armor and the Warrior's Endure ability (upstream
++## KingsCrown, ClassArmor, ArmorAbility, Endure). Covers:
++##   - the crown needs worn armor and opens WndChooseAbility
++##   - unported abilities are refused; choosing Endure converts the worn
++##     armor into class armor that keeps its stats, at 50% charge
++##   - the charger refills 0.2% per turn up to 100%
++##   - Endure spends 50% charge and 3 turns, halves and banks damage while
++##     bracing, then adds the bank to the next hit
++##   - hero save round trip keeps the ability, class armor and charge
++##   - the King of Dwarves drops the crown
++
++var _shown_window: WndBase = null
++
++
++class StubLevel:
++	extends RefCounted
++	var drops: Array = []
++	func drop_item(pos: int, item: Variant, _heap_type: String = "heap") -> Dictionary:
++		drops.append({"pos": pos, "item": item})
++		return {}
++
++
++func run(t: Object) -> void:
++	EventBus.show_window.connect(_on_show_window)
++
++	_test_registry(t)
++	_test_generator_ids(t)
++	_test_crown_needs_armor(t)
++	_test_unported_ability_refused(t)
++	_test_choose_endure_converts_armor(t)
++	_test_other_class_gets_own_armor(t)
++	_test_charger_refills(t)
++	_test_endure_activation(t)
++	_test_endure_tracker(t)
++	_test_endure_non_char_damage(t)
++	_test_save_round_trip(t)
++	_test_king_drops_crown(t)
++
++	EventBus.show_window.disconnect(_on_show_window)
++
++
++func _on_show_window(wnd: Variant) -> void:
++	_shown_window = wnd as WndBase
++
++
++func _clear_window() -> void:
++	if _shown_window != null:
++		_shown_window.free()
++		_shown_window = null
++
++
++func _make_hero(hero_class: int = ConstantsData.HeroClass.WARRIOR) -> Hero:
++	var hero := Hero.new()
++	hero.init_class(hero_class)
++	var armor: Armor = Generator.create_item("mail_armor") as Armor
++	armor.level = 2
++	armor.augment = Armor.Augment.DEFENSE
++	armor.inscribe(ArmorGlyph.create("obfuscation"))
++	armor.seal_attached = true
++	armor.identify()
++	hero.belongings.equip_armor(armor)
++	hero.belongings.add_item(Generator.create_item("kings_crown"))
++	return hero
++
++
++func _find_crown(hero: Hero) -> Item:
++	return hero.belongings.find_item_by_id("kings_crown")
++
++
++## Make a warrior who has already used the crown on Endure.
++func _make_endure_hero() -> Hero:
++	var hero := _make_hero()
++	var crown: KingsCrown = _find_crown(hero) as KingsCrown
++	crown.upgrade_armor(hero, ArmorAbility.create("endure"))
++	return hero
++
++
++func _test_registry(t: Object) -> void:
++	var classes: Array[int] = [
++		ConstantsData.HeroClass.WARRIOR, ConstantsData.HeroClass.MAGE,
++		ConstantsData.HeroClass.ROGUE, ConstantsData.HeroClass.HUNTRESS,
++		ConstantsData.HeroClass.DUELIST,
++	]
++	var implemented: Array[String] = []
++	for hero_class: int in classes:
++		var abilities: Array[ArmorAbility] = ArmorAbility.abilities_for(hero_class)
++		t.check(abilities.size() == 3, "class %d offers three armor abilities" % hero_class)
++		for ability: ArmorAbility in abilities:
++			t.check(ability.hero_class == hero_class,
++				"%s belongs to the class that offers it" % ability.ability_id)
++			if ability.implemented:
++				implemented.append(ability.ability_id)
++	t.check(implemented == ["endure"], "only Endure is implemented so far")
++	t.check(ArmorAbility.create("endure").charge_use(null) == 50.0, "Endure costs 50% charge")
++	t.check(ArmorAbility.create("nonsense") == null, "unknown ability ids build nothing")
++
++
++func _test_generator_ids(t: Object) -> void:
++	var crown: Item = Generator.create_item("kings_crown")
++	t.check(crown is KingsCrown, "Generator builds the King's Crown")
++	t.check(crown != null and crown.sprite_index == 60, "the crown uses the SPD crown sprite")
++	var class_armor: Item = Generator.create_item("warrior_armor")
++	t.check(class_armor is ClassArmor, "Generator builds class armor by id")
++	t.check(class_armor != null and class_armor.sprite_index == 181,
++		"warrior armor uses the SPD warrior armor sprite")
++	t.check(not Armor.all_ids().has("warrior_armor"), "class armor is not in the random armor pool")
++
++
++func _test_crown_needs_armor(t: Object) -> void:
++	var hero := _make_hero()
++	var crown: Item = _find_crown(hero)
++	var armor: Item = hero.belongings.unequip("armor")
++	_shown_window = null
++	crown.execute(hero)
++	t.check(_shown_window == null, "the crown does nothing without worn armor")
++	_clear_window()
++
++	hero.belongings.equip_armor(armor)
++	crown.execute(hero)
++	t.check(_shown_window is WndChooseAbility, "wearing the crown opens the ability choice")
++	t.check(_find_crown(hero) != null, "the crown is kept until an ability is chosen")
++	_clear_window()
++	hero.free()
++
++
++func _test_unported_ability_refused(t: Object) -> void:
++	var hero := _make_hero()
++	var crown: Item = _find_crown(hero)
++	_shown_window = null
++	crown.execute(hero)
++	var wnd: WndChooseAbility = _shown_window as WndChooseAbility
++	if wnd != null:
++		wnd.choose("heroic_leap")
++		wnd.choose("elemental_blast")
++	t.check(hero.armor_ability == null, "unported or other-class abilities can't be chosen")
++	t.check(_find_crown(hero) != null, "a refused choice keeps the crown")
++	t.check(not (hero.belongings.armor is ClassArmor), "a refused choice leaves the armor alone")
++	_clear_window()
++	hero.free()
++
++
++func _test_choose_endure_converts_armor(t: Object) -> void:
++	var hero := _make_hero()
++	var crown: Item = _find_crown(hero)
++	_shown_window = null
++	crown.execute(hero)
++	var wnd: WndChooseAbility = _shown_window as WndChooseAbility
++	t.check(wnd != null, "the crown shows a WndChooseAbility")
++	if wnd != null:
++		wnd.choose("endure")
++
++	var worn: ClassArmor = hero.belongings.armor as ClassArmor
++	t.check(hero.armor_ability != null and hero.armor_ability.ability_id == "endure",
++		"choosing Endure sets the hero's armor ability")
++	t.check(_find_crown(hero) == null, "choosing consumes the crown")
++	t.check(worn != null and worn.item_id == "warrior_armor", "the worn armor becomes warrior armor")
++	if worn != null:
++		t.check(worn.tier == 3, "class armor keeps the source tier")
++		t.check(worn.level == 2, "class armor keeps the source level")
++		t.check(worn.augment == Armor.Augment.DEFENSE, "class armor keeps the augment")
++		t.check(worn.glyph != null and worn.glyph.glyph_id == "obfuscation", "class armor keeps the glyph")
++		t.check(worn.seal_attached, "class armor keeps the broken seal")
++		t.check(worn.is_identified(), "identified source armor gives identified class armor")
++		t.check(is_equal_approx(worn.charge, 50.0), "class armor starts at 50% charge")
++		t.check(worn.dr_max() == Armor.create("mail_armor").dr_max(2) + 4,
++			"class armor defends like the source armor")
++		t.check(worn.value() == 0, "class armor can't be sold")
++	t.check(hero.has_buff("ClassArmorCharger"), "the hero gains the class armor charger")
++
++	var crown_again: Item = Generator.create_item("kings_crown")
++	hero.belongings.add_item(crown_again)
++	_clear_window()
++	crown_again.execute(hero)
++	t.check(_shown_window == null, "a second crown is refused once an ability is chosen")
++	_clear_window()
++	hero.free()
++
++
++func _test_other_class_gets_own_armor(t: Object) -> void:
++	var armor: Armor = Armor.create("leather_armor")
++	armor.cursed = true
++	var robe: ClassArmor = ClassArmor.from_armor(ConstantsData.HeroClass.MAGE, armor)
++	t.check(robe.item_id == "mage_armor", "a mage's crown makes a mage robe")
++	t.check(robe.cursed and robe.cursed_known, "curses carry over and become known")
++	t.check(not robe.level_known, "an unidentified level stays unknown")
++
++
++func _test_charger_refills(t: Object) -> void:
++	var hero := _make_endure_hero()
++	var worn: ClassArmor = hero.belongings.armor as ClassArmor
++	var charger: ClassArmorCharger = hero.get_buff("ClassArmorCharger") as ClassArmorCharger
++	worn.charge = 10.0
++	for _i: int in range(5):
++		charger.on_turn()
++	t.check(is_equal_approx(worn.charge, 11.0), "the charger adds 0.2% per turn")
++	worn.charge = 99.9
++	charger.on_turn()
++	t.check(is_equal_approx(worn.charge, 100.0), "charge caps at 100%")
++	hero.free()
++
++
++func _test_endure_activation(t: Object) -> void:
++	var hero := _make_endure_hero()
++	var worn: ClassArmor = hero.belongings.armor as ClassArmor
++	worn.charge = 60.0
++	hero._do_armor_ability(hero.pos)
++	t.check(is_equal_approx(hero._ability_spend, 3.0 * hero.get_speed()),
++		"Endure takes 3 turns (scaled like other non-movement actions)")
++	t.check(is_equal_approx(worn.charge, 10.0), "Endure spends 50% charge")
++	var tracker: EndureTracker = hero.get_buff("EndureTracker") as EndureTracker
++	t.check(tracker != null and tracker.enduring, "Endure starts the bracing tracker")
++
++	hero._ability_spend = 0.0
++	hero._do_armor_ability(hero.pos)
++	t.check(hero._ability_spend == 0.0, "Endure is refused without enough charge")
++	t.check(is_equal_approx(worn.charge, 10.0), "a refused Endure spends no charge")
++
++	var bare := _make_endure_hero()
++	(bare.belongings.armor as ClassArmor).charge = 100.0
++	bare.belongings.unequip("armor")
++	bare._do_armor_ability(bare.pos)
++	t.check(bare._ability_spend == 0.0 and not bare.has_buff("EndureTracker"),
++		"the ability needs the class armor to be worn")
++	bare.free()
++	hero.free()
++
++
++func _test_endure_tracker(t: Object) -> void:
++	var hero := _make_endure_hero()
++	var tracker: EndureTracker = EndureTracker.new()
++	hero.add_buff(tracker)
++	t.check(is_equal_approx(tracker.adjust_damage_taken(10.0), 5.0), "bracing halves damage taken")
++	t.check(tracker.adjust_damage_taken(7.0) == 3.5, "bracing halves odd damage too")
++	t.check(tracker.damage_bonus == 8, "half of each hit is banked (5 + 3)")
++	tracker.end_enduring()
++	t.check(not tracker.enduring and tracker.hits_left == 1, "bracing ends with one empowered hit")
++	t.check(is_equal_approx(tracker.adjust_damage_taken(10.0), 10.0), "no reduction after bracing ends")
++	t.check(is_equal_approx(tracker.damage_factor(4.0), 12.0), "the next hit carries the banked damage")
++	t.check(not hero.has_buff("EndureTracker"), "the tracker ends after the empowered hit")
++
++	var empty: EndureTracker = EndureTracker.new()
++	hero.add_buff(empty)
++	empty.end_enduring()
++	t.check(not hero.has_buff("EndureTracker"), "bracing with nothing banked just ends")
++	hero.free()
++
++
++func _test_endure_non_char_damage(t: Object) -> void:
++	var hero := _make_endure_hero()
++	hero.hp = 50
++	hero.hp_max = 50
++	hero.ht = 50
++	hero.add_buff(EndureTracker.new())
++	var hp_before: int = hero.hp
++	hero.take_damage(10, "poison")
++	t.check(hp_before - hero.hp == 5, "bracing halves damage from non-character sources")
++	hero.free()
++
++
++func _test_save_round_trip(t: Object) -> void:
++	var hero := _make_endure_hero()
++	(hero.belongings.armor as ClassArmor).charge = 73.5
++	var data: Dictionary = hero.serialize()
++
++	var loaded := Hero.new()
++	loaded.deserialize(data)
++	var worn: ClassArmor = loaded.belongings.armor as ClassArmor
++	t.check(loaded.armor_ability != null and loaded.armor_ability.ability_id == "endure",
++		"the armor ability survives a save")
++	t.check(worn != null and worn.item_id == "warrior_armor", "the class armor survives a save")
++	t.check(worn != null and is_equal_approx(worn.charge, 73.5), "the charge survives a save")
++	t.check(worn != null and worn.tier == 3 and worn.level == 2, "class armor stats survive a save")
++	t.check(loaded.has_buff("ClassArmorCharger"), "the charger is present after loading")
++
++	var plain := Hero.new()
++	plain.init_class(ConstantsData.HeroClass.WARRIOR)
++	var plain_loaded := Hero.new()
++	plain_loaded.deserialize(plain.serialize())
++	t.check(plain_loaded.armor_ability == null and not plain_loaded.has_buff("ClassArmorCharger"),
++		"a hero without an ability loads without one")
++	plain.free()
++	plain_loaded.free()
++	loaded.free()
++	hero.free()
++
++
++func _test_king_drops_crown(t: Object) -> void:
++	var king: DwarfKing = DwarfKing.new()
++	var level: StubLevel = StubLevel.new()
++	king.level = level
++	king.pos = ConstantsData.xy_to_pos(16, 10)
++	king._on_death(null)
++	var crowns: int = 0
++	var crown_pos: int = -1
++	for entry: Dictionary in level.drops:
++		var item: Item = entry["item"] as Item
++		if item is KingsCrown:
++			crowns += 1
++			crown_pos = entry["pos"]
++	t.check(crowns == 1, "the King of Dwarves drops exactly one crown")
++	t.check(crown_pos == ConstantsData.xy_to_pos(16, 10), "the crown drops where the King fell")
++	king.free()
+diff --git a/tests/cases/test_kings_crown_class_armor.gd.uid b/tests/cases/test_kings_crown_class_armor.gd.uid
+new file mode 100644
+index 0000000..891f8d7
+--- /dev/null
++++ b/tests/cases/test_kings_crown_class_armor.gd.uid
+@@ -0,0 +1 @@
++uid://rcjk6n0m3k8l
+-- 
+2.43.0
+
